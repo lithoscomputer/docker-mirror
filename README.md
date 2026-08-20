@@ -1,0 +1,35 @@
+# Docker Mirror
+
+This repository publishes immutable copies of the third-party container images
+used by Lithos Computer automation. Consumers pull the public copies from
+GitHub Container Registry without authentication.
+
+The mirror copies existing OCI manifests and layers. It does not rebuild or
+modify upstream images. Each source is pinned by digest in `images.json`, and
+the workflow fails if the destination digest differs from the source digest.
+
+## Published images
+
+| Upstream | Mirror |
+| --- | --- |
+| `docker.io/library/buildpack-deps` | `ghcr.io/lithoscomputer/docker-mirror/buildpack-deps` |
+| `docker.io/library/node` | `ghcr.io/lithoscomputer/docker-mirror/node` |
+| `docker.io/openapitools/openapi-generator-cli` | `ghcr.io/lithoscomputer/docker-mirror/openapi-generator-cli` |
+| `docker.io/library/postgres` | `ghcr.io/lithoscomputer/docker-mirror/postgres` |
+| `docker.io/library/rust` | `ghcr.io/lithoscomputer/docker-mirror/rust` |
+| `docker.io/library/debian` | `ghcr.io/lithoscomputer/docker-mirror/debian` |
+
+The upstream projects retain ownership of their images, software, metadata,
+and licenses. This repository provides a distribution mirror only.
+
+## Update an image
+
+1. Select an exact upstream digest that has been public for at least 24 hours.
+2. Update its entry in `images.json` and set `notBefore` to the earliest time
+   the workflow may copy it.
+3. Merge the change to `main`.
+4. Confirm that the mirror workflow passes its digest and anonymous-access
+   checks.
+
+Moving upstream tags never update this mirror automatically. Consumers should
+use the mirrored digest, not a tag.

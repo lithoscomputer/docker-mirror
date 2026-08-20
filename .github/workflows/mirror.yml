@@ -1,0 +1,106 @@
+name: Mirror container images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images.json
+      - .github/workflows/mirror.yml
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-container-images
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  mirror:
+    name: Mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to GHCR for publishing
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" \
+            | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Copy exact upstream images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -e '
+            .images | type == "array" and length > 0 and
+            all(.[ ];
+              keys == ["destination", "notBefore", "source", "tag"] and
+              (.source | type == "string") and
+              (.destination | type == "string") and
+              (.tag | type == "string") and
+              (.notBefore | type == "string")
+            )
+          ' images.json >/dev/null
+
+          while IFS= read -r image; do
+            source=$(jq -er .source <<<"$image")
+            destination=$(jq -er .destination <<<"$image")
+            tag=$(jq -er .tag <<<"$image")
+            not_before=$(jq -er .notBefore <<<"$image")
+
+            if [[ ! "$source" =~ ^docker\.io/.+@sha256:[0-9a-f]{64}$ ]]; then
+              echo "Source is not an exact Docker Hub digest: $source" >&2
+              exit 1
+            fi
+            if [[ ! "$destination" =~ ^ghcr\.io/lithoscomputer/docker-mirror/[a-z0-9._-]+$ ]]; then
+              echo "Destination is outside the mirror namespace: $destination" >&2
+              exit 1
+            fi
+            if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "Invalid destination tag: $tag" >&2
+              exit 1
+            fi
+
+            eligible_at=$(date --date="$not_before" +%s)
+            if (( $(date +%s) < eligible_at )); then
+              echo "$source is not eligible for mirroring until $not_before" >&2
+              exit 1
+            fi
+
+            expected_digest=${source##*@}
+            metadata_file=$(mktemp)
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --progress=plain \
+              --metadata-file "$metadata_file" \
+              --tag "$destination:$tag" \
+              "$source"
+            actual_digest=$(jq -er '."containerimage.descriptor".digest' "$metadata_file")
+            rm -f "$metadata_file"
+
+            if [[ "$actual_digest" != "$expected_digest" ]]; then
+              echo "Digest changed while copying $source: $actual_digest" >&2
+              exit 1
+            fi
+          done < <(jq -c '.images[]' images.json)
+
+      - name: Verify anonymous access
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+
+          while IFS= read -r image; do
+            source=$(jq -er .source <<<"$image")
+            destination=$(jq -er .destination <<<"$image")
+            expected_digest=${source##*@}
+            docker buildx imagetools inspect \
+              "$destination@$expected_digest" >/dev/null
+          done < <(jq -c '.images[]' images.json)
