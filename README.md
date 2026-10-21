@@ -33,3 +33,15 @@ and licenses. This repository provides a distribution mirror only.
 
 Moving upstream tags never update this mirror automatically. Consumers should
 use the mirrored digest, not a tag.
+
+## Certificate trust gate
+
+Before publishing, inspect each Linux platform's system CA bundle without
+executing source-image code. All twelve checked-in eMudhra certificate chains
+must fail verification. Missing bundles or inconclusive checks stop publication.
+The fixtures come from https://emudhra.we-have-a-problem.com/chains.zip.
+
+This gate does not repair an old source image. Select and verify fixed upstream
+images before publication can resume. Java and other runtimes with private trust
+stores need separate validation; passing the native CA gate alone does not
+establish full runtime coverage.
